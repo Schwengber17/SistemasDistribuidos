@@ -22,6 +22,7 @@ package DIMEX
 import (
 	PP2PLink "SD/PP2PLink"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -142,6 +143,15 @@ func (module *DIMEX_Module) handleUponReqEntry() {
 							trigger [ pl , Send | [ reqEntry, r, myTs ]
 		    			estado := queroSC
 	*/
+	module.lcl++
+	module.reqTs = module.lcl
+	module.nbrResps = 0
+	for i, addr := range module.addresses {
+		if i != module.id {
+			module.sendToLink(addr, fmt.Sprintf("reqEntry;%d;%d", module.id, module.reqTs), "    ")
+		}
+	}
+	module.st = wantMX
 }
 
 func (module *DIMEX_Module) handleUponReqExit() {
@@ -152,6 +162,13 @@ func (module *DIMEX_Module) handleUponReqExit() {
 		    				estado := naoQueroSC
 							waiting := {}
 	*/
+	for i, w := range module.waiting {
+		if w {
+			module.sendToLink(module.addresses[i], fmt.Sprintf("respOK;%d", module.id), "    ")
+			module.waiting[i] = false
+		}
+	}
+	module.st = noMX
 }
 
 // ------------------------------------------------------------------------------------
@@ -169,6 +186,11 @@ func (module *DIMEX_Module) handleUponDeliverRespOk(msgOutro PP2PLink.PP2PLink_I
 		  					    estado := estouNaSC
 
 	*/
+	module.nbrResps++
+	if module.nbrResps == len(module.addresses)-1 {
+		module.st = inMX
+		module.Ind <- dmxResp{}
+	}
 }
 
 func (module *DIMEX_Module) handleUponDeliverReqEntry(msgOutro PP2PLink.PP2PLink_Ind_Message) {
@@ -184,6 +206,18 @@ func (module *DIMEX_Module) handleUponDeliverReqEntry(msgOutro PP2PLink.PP2PLink
 		        				então  postergados := postergados + [p, r ]
 		     					lts.ts := max(lts.ts, rts.ts)
 	*/
+	otherId, otherTs := parseMsg(msgOutro.Message)
+	respond := module.st == noMX ||
+		(module.st == wantMX && before(otherId, otherTs, module.id, module.reqTs))
+
+	if respond {
+		module.sendToLink(module.addresses[otherId], fmt.Sprintf("respOK;%d", module.id), "    ")
+	} else {
+		module.waiting[otherId] = true
+	}
+	if otherTs > module.lcl {
+		module.lcl = otherTs
+	}
 }
 
 // ------------------------------------------------------------------------------------
@@ -195,6 +229,17 @@ func (module *DIMEX_Module) sendToLink(address string, content string, space str
 	module.Pp2plink.Req <- PP2PLink.PP2PLink_Req_Message{
 		To:      address,
 		Message: content}
+}
+
+// mensagens tem o formato "tipo;idRemetente;valor" - retorna idRemetente e valor
+func parseMsg(msg string) (int, int) {
+	parts := strings.Split(msg, ";")
+	from, _ := strconv.Atoi(parts[1])
+	val := 0
+	if len(parts) > 2 {
+		val, _ = strconv.Atoi(parts[2])
+	}
+	return from, val
 }
 
 func before(oneId, oneTs, othId, othTs int) bool {
