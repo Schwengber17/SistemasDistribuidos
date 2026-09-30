@@ -64,6 +64,16 @@ func main() {
 	// espera para facilitar inicializacao de todos processos (a mao)
 	time.Sleep(3 * time.Second)
 
+	// processo 0 inicia snapshots sucessivos (ids 1, 2, 3 ...) concorrentemente aos seus acessos
+	if id == 0 {
+		go func() {
+			for {
+				time.Sleep(100 * time.Millisecond)
+				dmx.Req <- DIMEX.SNAPSHOT
+			}
+		}()
+	}
+
 	for {
 		// SOLICITA ACESSO AO DIMEX
 		fmt.Println("[ APP id: ", id, " PEDE   MX ]")
