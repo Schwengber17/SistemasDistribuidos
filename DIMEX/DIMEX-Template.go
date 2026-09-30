@@ -28,6 +28,10 @@ import (
 	"strings"
 )
 
+// injecao de falhas (parte 2, etapa 4):
+// 0 = correto; 1 = responde mesmo estando na SC (viola a SC); 2 = nunca responde se quer a SC (bloqueia)
+const FALHA = 0
+
 // ------------------------------------------------------------------------------------
 // ------- principais tipos
 // ------------------------------------------------------------------------------------
@@ -243,6 +247,13 @@ func (module *DIMEX_Module) handleUponDeliverReqEntry(msgOutro PP2PLink.PP2PLink
 	otherId, otherTs := parseMsg(msgOutro.Message)
 	respond := module.st == noMX ||
 		(module.st == wantMX && before(otherId, otherTs, module.id, module.reqTs))
+
+	switch FALHA {
+	case 1:
+		respond = respond || module.st == inMX
+	case 2:
+		respond = module.st == noMX
+	}
 
 	if respond {
 		module.sendToLink(module.addresses[otherId], fmt.Sprintf("respOK;%d", module.id), "    ")
