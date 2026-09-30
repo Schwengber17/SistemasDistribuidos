@@ -21,7 +21,9 @@ package DIMEX
 
 import (
 	PP2PLink "SD/PP2PLink"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -37,10 +39,13 @@ const (
 	inMX
 )
 
+var stateNames = []string{"noMX", "wantMX", "inMX"}
+
 type dmxReq int // enumeracao dos estados possiveis de um processo
 const (
 	ENTER dmxReq = iota
 	EXIT
+	SNAPSHOT // app pede para este processo iniciar um novo snapshot
 )
 
 type dmxResp struct { // mensagem do módulo DIMEX infrmando que pode acessar - pode ser somente um sinal (vazio)
@@ -59,7 +64,26 @@ type DIMEX_Module struct {
 	nbrResps  int
 	dbg       bool
 
+	snapId   int               // ultimo snapshot iniciado por este processo
+	snaps    map[int]*Snapshot // snapshots em andamento neste processo, por identificador
+	snapFile *os.File          // arquivo onde este processo grava seus snapshots
+
 	Pp2plink *PP2PLink.PP2PLink // acesso aa comunicacao enviar por PP2PLinq.Req  e receber por PP2PLinq.Ind
+}
+
+// estado gravado por um processo em um snapshot - uma linha JSON em snapshot-p<id>.txt
+type Snapshot struct {
+	SnapId   int
+	Id       int
+	St       string
+	Waiting  []bool
+	Lcl      int
+	ReqTs    int
+	NbrResps int
+	Channels [][]string // Channels[j]: mensagens de j para este processo que estavam em transito
+
+	recording []bool // canais de entrada ainda sendo gravados (campos minusculos nao vao para o arquivo)
+	markers   int    // marcadores recebidos ate agora
 }
 
 // ------------------------------------------------------------------------------------
@@ -81,6 +105,7 @@ func NewDIMEX(_addresses []string, _id int, _dbg bool) *DIMEX_Module {
 		lcl:       0,
 		reqTs:     0,
 		dbg:       _dbg,
+		snaps:     make(map[int]*Snapshot),
 
 		Pp2plink: p2p}
 
@@ -109,18 +134,27 @@ func (module *DIMEX_Module) Start() {
 				} else if dmxR == EXIT {
 					module.outDbg("app libera mx")
 					module.handleUponReqExit() // ENTRADA DO ALGORITMO
+
+				} else if dmxR == SNAPSHOT {
+					module.outDbg("app pede snapshot")
+					module.handleUponReqSnapshot() // ENTRADA DO ALGORITMO
 				}
 
 			case msgOutro := <-module.Pp2plink.Ind: // vindo de outro processo
 				//fmt.Printf("dimex recebe da rede: ", msgOutro)
 				if strings.Contains(msgOutro.Message, "respOK") {
 					module.outDbg("         <<<---- responde! " + msgOutro.Message)
+					module.recordInTransit(msgOutro)
 					module.handleUponDeliverRespOk(msgOutro) // ENTRADA DO ALGORITMO
 
 				} else if strings.Contains(msgOutro.Message, "reqEntry") {
 					module.outDbg("          <<<---- pede??  " + msgOutro.Message)
+					module.recordInTransit(msgOutro)
 					module.handleUponDeliverReqEntry(msgOutro) // ENTRADA DO ALGORITMO
 
+				} else if strings.Contains(msgOutro.Message, "snapshot") {
+					module.outDbg("          <<<---- marcador " + msgOutro.Message)
+					module.handleUponDeliverSnapshot(msgOutro) // ENTRADA DO ALGORITMO
 				}
 			}
 		}
@@ -218,6 +252,82 @@ func (module *DIMEX_Module) handleUponDeliverReqEntry(msgOutro PP2PLink.PP2PLink
 	if otherTs > module.lcl {
 		module.lcl = otherTs
 	}
+}
+
+// ------------------------------------------------------------------------------------
+// ------- snapshot (Chandy-Lamport)
+// ------- UPON snapshot (pedido da app: inicia um novo snapshot)
+// ------- UPON marcador [ snapshot, id, snapId ] vindo de outro processo
+// ------------------------------------------------------------------------------------
+
+func (module *DIMEX_Module) handleUponReqSnapshot() {
+	module.snapId++
+	module.takeSnapshot(module.snapId)
+}
+
+func (module *DIMEX_Module) handleUponDeliverSnapshot(msgOutro PP2PLink.PP2PLink_Ind_Message) {
+	otherId, snapId := parseMsg(msgOutro.Message)
+	snap, ok := module.snaps[snapId]
+	if !ok { // primeiro marcador deste snapshot: grava estado e propaga
+		snap = module.takeSnapshot(snapId)
+	}
+	snap.recording[otherId] = false // canal de otherId encerrado (vazio se foi o primeiro marcador)
+	snap.markers++
+	if snap.markers == len(module.addresses)-1 { // marcador recebido de todos os canais: terminou
+		module.saveSnapshot(snap)
+	}
+}
+
+// grava o estado local, comeca a gravar todos os canais de entrada e envia marcador a todos
+func (module *DIMEX_Module) takeSnapshot(snapId int) *Snapshot {
+	n := len(module.addresses)
+	snap := &Snapshot{
+		SnapId:    snapId,
+		Id:        module.id,
+		St:        stateNames[module.st],
+		Waiting:   make([]bool, n),
+		Lcl:       module.lcl,
+		ReqTs:     module.reqTs,
+		NbrResps:  module.nbrResps,
+		Channels:  make([][]string, n),
+		recording: make([]bool, n),
+	}
+	copy(snap.Waiting, module.waiting)
+	for i := range module.addresses {
+		snap.Channels[i] = []string{}
+		snap.recording[i] = i != module.id
+	}
+	module.snaps[snapId] = snap
+
+	for i, addr := range module.addresses {
+		if i != module.id {
+			module.sendToLink(addr, fmt.Sprintf("snapshot;%d;%d", module.id, snapId), "    ")
+		}
+	}
+	return snap
+}
+
+// mensagem do algoritmo recebida: se o canal de origem esta sendo gravado em algum snapshot, ela estava em transito
+func (module *DIMEX_Module) recordInTransit(msgOutro PP2PLink.PP2PLink_Ind_Message) {
+	otherId, _ := parseMsg(msgOutro.Message)
+	for _, snap := range module.snaps {
+		if snap.recording[otherId] {
+			snap.Channels[otherId] = append(snap.Channels[otherId], msgOutro.Message)
+		}
+	}
+}
+
+func (module *DIMEX_Module) saveSnapshot(snap *Snapshot) {
+	if module.snapFile == nil {
+		f, err := os.Create(fmt.Sprintf("snapshot-p%d.txt", module.id))
+		if err != nil {
+			fmt.Println("Error creating snapshot file:", err)
+		}
+		module.snapFile = f
+	}
+	line, _ := json.Marshal(snap)
+	module.snapFile.WriteString(string(line) + "\n")
+	delete(module.snaps, snap.SnapId)
 }
 
 // ------------------------------------------------------------------------------------

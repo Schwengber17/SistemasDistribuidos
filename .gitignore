@@ -1,5 +1,6 @@
 dimex
 dimex.exe
 mxOUT.txt
+snapshot-p*.txt
 saida-p*.txt
 .DS_Store
