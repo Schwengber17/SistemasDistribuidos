@@ -1,11 +1,11 @@
-# Roda 3 processos DIMEX por alguns segundos, depois verifica mxOUT.txt.
+# Roda 3 processos DIMEX por alguns segundos, depois verifica mxOUT.txt e os snapshots.
 # Uso:  .\executar.ps1            (60 segundos)
 #       .\executar.ps1 -Segundos 30
 param([int]$Segundos = 60)
 
 $addrs = "127.0.0.1:5000", "127.0.0.1:6001", "127.0.0.1:7002"
 
-Remove-Item mxOUT.txt, saida-p*.txt -ErrorAction SilentlyContinue
+Remove-Item mxOUT.txt, snapshot-p*.txt, saida-p*.txt -ErrorAction SilentlyContinue
 go build -o dimex.exe useDIMEX-f.go
 if (-not $?) { exit 1 }
 
@@ -21,3 +21,6 @@ Write-Host "`n--- mxOUT.txt ---"
 Write-Host "acessos a SC: $(([regex]::Matches($mx, '\|')).Count)"
 Write-Host "ocorrencias de '||': $(([regex]::Matches($mx, '\|\|')).Count)"
 Write-Host "ocorrencias de '..': $(([regex]::Matches($mx, '\.\.')).Count)"
+
+Write-Host "`n--- snapshots ---"
+go run ./snapcheck 3
