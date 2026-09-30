@@ -1,16 +1,16 @@
 /*  Construido como parte da disciplina: FPPD - PUCRS - Escola Politecnica
     Professor: Fernando Dotti  (https://fldotti.github.io/)
-    Modulo representando Algoritmo de Exclusão Mútua Distribuída:
+    Modulo representando Algoritmo de ExclusÃ£o MÃºtua DistribuÃ­da:
     Semestre 2023/1
 	Aspectos a observar:
-	   mapeamento de módulo para estrutura
+	   mapeamento de mÃ³dulo para estrutura
 	   inicializacao
-	   semantica de concorrência: cada evento é atômico
-	   							  módulo trata 1 por vez
+	   semantica de concorrÃªncia: cada evento Ã© atÃ´mico
+	   							  mÃ³dulo trata 1 por vez
 	Q U E S T A O
-	   Além de obviamente entender a estrutura ...
-	   Implementar o núcleo do algoritmo ja descrito, ou seja, o corpo das
-	   funcoes reativas a cada entrada possível:
+	   AlÃ©m de obviamente entender a estrutura ...
+	   Implementar o nÃºcleo do algoritmo ja descrito, ou seja, o corpo das
+	   funcoes reativas a cada entrada possÃ­vel:
 	   			handleUponReqEntry()  // recebe do nivel de cima (app)
 				handleUponReqExit()   // recebe do nivel de cima (app)
 				handleUponDeliverRespOk(msgOutro)   // recebe do nivel de baixo
@@ -52,7 +52,7 @@ const (
 	SNAPSHOT // app pede para este processo iniciar um novo snapshot
 )
 
-type dmxResp struct { // mensagem do módulo DIMEX infrmando que pode acessar - pode ser somente um sinal (vazio)
+type dmxResp struct { // mensagem do mÃ³dulo DIMEX infrmando que pode acessar - pode ser somente um sinal (vazio)
 	// mensagem para aplicacao indicando que pode prosseguir
 }
 
@@ -60,7 +60,7 @@ type DIMEX_Module struct {
 	Req       chan dmxReq  // canal para receber pedidos da aplicacao (REQ e EXIT)
 	Ind       chan dmxResp // canal para informar aplicacao que pode acessar
 	addresses []string     // endereco de todos, na mesma ordem
-	id        int          // identificador do processo - é o indice no array de enderecos acima
+	id        int          // identificador do processo - Ã© o indice no array de enderecos acima
 	st        State        // estado deste processo na exclusao mutua distribuida
 	waiting   []bool       // processos aguardando tem flag true
 	lcl       int          // relogio logico local
@@ -130,7 +130,7 @@ func (module *DIMEX_Module) Start() {
 	go func() {
 		for {
 			select {
-			case dmxR := <-module.Req: // vindo da  aplicação
+			case dmxR := <-module.Req: // vindo da  aplicaÃ§Ã£o
 				if dmxR == ENTER {
 					module.outDbg("app pede mx")
 					module.handleUponReqEntry() // ENTRADA DO ALGORITMO
@@ -220,7 +220,7 @@ func (module *DIMEX_Module) handleUponDeliverRespOk(msgOutro PP2PLink.PP2PLink_I
 						upon event [ pl, Deliver | p, [ respOk, r ] ]
 		      				resps++
 		      				se resps = N
-		    				então trigger [ dmx, Deliver | free2Access ]
+		    				entÃ£o trigger [ dmx, Deliver | free2Access ]
 		  					    estado := estouNaSC
 
 	*/
@@ -237,11 +237,11 @@ func (module *DIMEX_Module) handleUponDeliverReqEntry(msgOutro PP2PLink.PP2PLink
 						upon event [ pl, Deliver | p, [ reqEntry, r, rts ]  do
 		     				se (estado == naoQueroSC)   OR
 		        				 (estado == QueroSC AND  myTs >  ts)
-							então  trigger [ pl, Send | p , [ respOk, r ]  ]
-		 					senão
+							entÃ£o  trigger [ pl, Send | p , [ respOk, r ]  ]
+		 					senÃ£o
 		        				se (estado == estouNaSC) OR
 		           					 (estado == QueroSC AND  myTs < ts)
-		        				então  postergados := postergados + [p, r ]
+		        				entÃ£o  postergados := postergados + [p, r ]
 		     					lts.ts := max(lts.ts, rts.ts)
 	*/
 	otherId, otherTs := parseMsg(msgOutro.Message)
