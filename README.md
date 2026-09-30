@@ -2,10 +2,8 @@
 
 ## Componentes
 
-- NOME COMPLETO 1
-- NOME COMPLETO 2
-- NOME COMPLETO 3
-- NOME COMPLETO 4
+Francisco Freitas
+Gabriel Ottonelli
 
 ## Estrutura
 
